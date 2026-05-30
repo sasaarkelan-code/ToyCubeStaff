@@ -1,0 +1,143 @@
+// ToyCube — Prisma schema
+// Документация: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------
+// Роли (RBAC). Порядок важен для иерархии полномочий.
+// ----------------------------------------------------
+enum Role {
+  MODERATOR
+  SENIOR_MODERATOR
+  ADMIN
+  OWNER
+}
+
+// Режим работы сотрудника (как на скриншоте: Анархия / Лайт и т.п.)
+enum WorkMode {
+  ANARCHY
+  LIGHT
+}
+
+enum StaffStatus {
+  ONLINE
+  OFFLINE
+  VACATION
+}
+
+// ----------------------------------------------------
+// Пользователь / сотрудник
+// ----------------------------------------------------
+model User {
+  id            String      @id @default(cuid())
+  login         String      @unique // например "@efkalid"
+  nickname      String // игровой ник
+  passwordHash  String
+  role          Role        @default(MODERATOR)
+
+  telegram      String? // @username, после привязки
+  telegramId    String? // id из Telegram OAuth (на будущее)
+  telegramLinked Boolean    @default(false)
+
+  position      String      @default("Мл. Сотрудник") // должность (текст)
+  workMode      WorkMode    @default(LIGHT)
+  status        StaffStatus @default(OFFLINE)
+
+  warnings      Int         @default(0) // преды
+  reprimands    Int         @default(0) // выговоры
+  onVacation    Boolean     @default(false) // отпуск
+  currency      Int         @default(0) // валюта (бывш. "Непонятки")
+
+  joinedAt      DateTime    @default(now()) // дата вступления
+  lastActiveAt  DateTime    @default(now())
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  dailyStats    DailyStat[]
+  logs          ActionLog[] @relation("ActorLogs")
+  vacationRequests VacationRequest[]
+  authoredManuals  Manual[]  @relation("ManualAuthor")
+}
+
+// ----------------------------------------------------
+// Ежедневная статистика сотрудника (агрегируется в нед/мес)
+// ----------------------------------------------------
+model DailyStat {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  date        DateTime // день (00:00)
+  checks      Int      @default(0) // проверки
+  mutes       Int      @default(0) // муты
+  bans        Int      @default(0) // баны
+  warnings    Int      @default(0) // предупреждения
+  punishments Int      @default(0) // наказания (общее)
+  playtimeMin Int      @default(0) // время в игре (минуты)
+
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, date])
+  @@index([date])
+}
+
+// ----------------------------------------------------
+// Заявки на отпуск
+// ----------------------------------------------------
+model VacationRequest {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  startDate DateTime
+  endDate   DateTime
+  reason    String
+  comment   String?
+  status    String   @default("PENDING") // PENDING / APPROVED / REJECTED
+
+  createdAt DateTime @default(now())
+}
+
+// ----------------------------------------------------
+// Мануалы (база знаний, Markdown)
+// ----------------------------------------------------
+model Manual {
+  id        String   @id @default(cuid())
+  title     String
+  category  String // Модерация / Наказания / Проверки / Жалобы / Правила
+  content   String // markdown
+
+  authorId  String?
+  author    User?    @relation("ManualAuthor", fields: [authorId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([category])
+}
+
+// ----------------------------------------------------
+// Логи действий
+// ----------------------------------------------------
+model ActionLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actor     User?    @relation("ActorLogs", fields: [actorId], references: [id])
+
+  action    String // LOGIN / LOGOUT / ROLE_GRANT / ROLE_REVOKE / PROFILE_UPDATE / ACCOUNT_CREATE / ACCOUNT_DELETE
+  target    String? // на кого/над чем
+  meta      Json? // доп. данные
+  ip        String?
+
+  createdAt DateTime @default(now())
+
+  @@index([action])
+  @@index([createdAt])
+}
